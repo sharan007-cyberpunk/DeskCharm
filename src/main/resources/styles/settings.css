@@ -1,0 +1,17 @@
+.root {
+    -fx-font-family: "Segoe UI", sans-serif;
+    -fx-background-color: #F7F5F3;
+}
+
+.label {
+    -fx-text-fill: #333333;
+}
+
+.button {
+    -fx-background-radius: 6;
+    -fx-padding: 8 14 8 14;
+}
+
+.combo-box, .slider, .check-box {
+    -fx-font-size: 12px;
+}
