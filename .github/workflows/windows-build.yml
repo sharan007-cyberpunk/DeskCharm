@@ -1,50 +1,33 @@
-name: DeskCharm Windows Build
+name: Windows Build
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch: {}
+    tags:
+      - "v*"
 
 jobs:
   build-windows:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          distribution: temurin
+          java-version: "21"
+          cache: maven
 
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Run tests
-        run: mvn --batch-mode clean test
-
-      - name: Build application (shaded jar)
-        run: mvn --batch-mode package -DskipTests
-
-      - name: Package Windows app + installer (jlink + jpackage)
+      - name: Test and package
         shell: pwsh
-        run: .\scripts\package-windows.ps1
+        run: .\scripts\build-windows.ps1
 
-      - name: Upload Windows build artifact
+      - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: DeskCharm-Windows-x64
-          path: |
-            dist/DeskCharm/**
-            dist/DeskCharm-*.exe
-            dist/README-WINDOWS.txt
+          path: dist/*
           if-no-files-found: error

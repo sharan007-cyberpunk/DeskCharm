@@ -1,0 +1,9 @@
+DeskCharm Windows build notes
+
+Fixed: RopeSimulation now performs a final forward stretch-ceiling pass so no rope segment can finish a simulation step beyond maxStretch. A regression test is included.
+
+Build locally on Windows:
+  mvn --batch-mode clean test
+  .\scripts\build-windows.ps1
+
+GitHub Actions builds on windows-latest and uploads the dist folder.

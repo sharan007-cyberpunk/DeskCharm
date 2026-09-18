@@ -1,65 +1,63 @@
-<#
-.SYNOPSIS
-    Full DeskCharm Windows build pipeline: verify tools -> clean -> test ->
-    compile -> package -> jlink runtime -> jpackage app + installer -> dist/.
-
-.DESCRIPTION
-    Run this from PowerShell in the project root, or double-click
-    build-windows.bat, which just calls this script.
-
-    Exact command:
-        powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
-#>
-
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $ProjectRoot
 
-function Assert-Command($Name, $VersionArgs, $Pattern) {
-    Write-Host "-- Verifying $Name --" -ForegroundColor Cyan
-    try {
-        $output = & $Name $VersionArgs 2>&1 | Out-String
-    } catch {
-        throw "$Name was not found on PATH. Please install it and try again."
-    }
-    if ($Pattern -and ($output -notmatch $Pattern)) {
-        Write-Warning "$Name is installed but the version could not be confirmed as expected ($Pattern). Continuing anyway."
-    }
-    Write-Host $output
+Write-Host "== DeskCharm Windows Build =="
+
+if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
+    throw "Java 21 is required."
+}
+if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {
+    throw "Maven is required."
 }
 
-Write-Host "======================================" -ForegroundColor Green
-Write-Host " DeskCharm Windows Build" -ForegroundColor Green
-Write-Host "======================================" -ForegroundColor Green
+$javaVersion = java -version 2>&1 | Select-String 'version "21'
+if (-not $javaVersion) {
+    Write-Warning "JDK 21 was not detected. Continuing, but Java 21 is recommended."
+}
 
-# 1. Verify Java 21
-Assert-Command "java" "-version" "21\."
+Remove-Item -Recurse -Force target, dist -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force dist | Out-Null
 
-# 2. Verify Maven
-Assert-Command "mvn" "-version" "Apache Maven"
+mvn clean test package
 
-# 3. Clean the project
-Write-Host "-- mvn clean --" -ForegroundColor Cyan
-& mvn clean
-if ($LASTEXITCODE -ne 0) { throw "mvn clean failed" }
+$jar = Get-ChildItem target -Filter "deskcharm-*.jar" |
+    Where-Object { $_.Name -notmatch "original" } |
+    Select-Object -First 1
 
-# 4. Run unit tests
-Write-Host "-- mvn test --" -ForegroundColor Cyan
-& mvn test
-if ($LASTEXITCODE -ne 0) { throw "Unit tests failed; aborting build. Fix failing tests before packaging." }
+if (-not $jar) {
+    throw "Application JAR was not produced."
+}
 
-# 5 & 6. Compile and package the application (also produces the shaded jar)
-Write-Host "-- mvn package (-DskipTests, already tested above) --" -ForegroundColor Cyan
-& mvn package "-DskipTests"
-if ($LASTEXITCODE -ne 0) { throw "mvn package failed" }
+Copy-Item $jar.FullName "dist\DeskCharm.jar"
 
-# 7-10. Create the runtime image, run jpackage, create the installer
-Write-Host "-- Packaging (jlink + jpackage) --" -ForegroundColor Cyan
-& (Join-Path $PSScriptRoot "package-windows.ps1")
+if (-not (Get-Command jpackage -ErrorAction SilentlyContinue)) {
+    Write-Warning "jpackage was not found. Source/JAR build completed; installer was not created."
+    exit 0
+}
 
-# 11. Final files are already placed into dist/ by package-windows.ps1
-Write-Host ""
-Write-Host "======================================" -ForegroundColor Green
-Write-Host " Build complete. See the dist\ folder:" -ForegroundColor Green
-Write-Host "======================================" -ForegroundColor Green
-Get-ChildItem (Join-Path $ProjectRoot "dist")
+$inputDir = "target\package-input"
+Remove-Item -Recurse -Force $inputDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $inputDir | Out-Null
+Copy-Item $jar.FullName $inputDir
+
+# jpackage receives the Maven dependencies through the classpath.
+# For a production release, dependency jars should be copied to this directory as well.
+$deps = "target\dependency"
+mvn dependency:copy-dependencies "-DoutputDirectory=$deps" "-DincludeScope=runtime"
+Get-ChildItem $deps -Filter "*.jar" | Copy-Item -Destination $inputDir
+
+jpackage `
+  --type exe `
+  --name DeskCharm `
+  --app-version 1.0.0 `
+  --input $inputDir `
+  --main-jar $jar.Name `
+  --main-class com.sharan.deskcharm.Main `
+  --dest dist `
+  --win-menu `
+  --win-shortcut `
+  --win-dir-chooser `
+  --win-per-user-install `
+  --description "Desktop hanging charm" `
+  --vendor "DeskCharm"
+
+Write-Host "Build complete. Check the dist directory."

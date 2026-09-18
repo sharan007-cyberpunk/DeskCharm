@@ -1,116 +1,47 @@
 package com.sharan.deskcharm.settings;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
-/**
- * Loads and saves {@link AppSettings} as JSON under the user's Windows
- * application data directory (typically {@code %APPDATA%\DeskCharm\}).
- * There is deliberately no global mutable singleton here: whoever needs
- * settings is handed a {@code SettingsStore} instance (or the loaded
- * {@link AppSettings} it produces) explicitly, e.g. via constructor
- * injection, rather than reaching for static state.
- */
-public class SettingsStore {
+public final class SettingsStore {
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private final Path file = Path.of(System.getenv().getOrDefault("APPDATA", System.getProperty("user.home")),
+            "DeskCharm", "settings.json");
 
-    private static final String SETTINGS_FILE_NAME = "settings.json";
-    private static final String APP_FOLDER_NAME = "DeskCharm";
-
-    private final Path settingsFilePath;
-    private final ObjectMapper objectMapper;
-
-    public SettingsStore() {
-        this(resolveDefaultAppDataDirectory());
-    }
-
-    /** Allows tests (and alternate platforms) to point at an arbitrary directory. */
-    public SettingsStore(Path appDataDirectory) {
-        this.settingsFilePath = appDataDirectory.resolve(SETTINGS_FILE_NAME);
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-        try {
-            Files.createDirectories(appDataDirectory);
-        } catch (IOException e) {
-            System.err.println("Could not create settings directory " + appDataDirectory
-                    + "; settings will not persist between runs: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Resolves {@code %APPDATA%\DeskCharm} on Windows, falling back to a
-     * dotfile-style directory under the user's home folder on other
-     * platforms (useful for running tests on non-Windows CI/dev machines).
-     */
-    private static Path resolveDefaultAppDataDirectory() {
-        String appData = System.getenv("APPDATA");
-        if (appData != null && !appData.isBlank()) {
-            return Paths.get(appData, APP_FOLDER_NAME);
-        }
-        String userHome = System.getProperty("user.home", ".");
-        return Paths.get(userHome, "." + APP_FOLDER_NAME.toLowerCase());
-    }
-
-    /**
-     * Loads settings from disk, repairing/clamping any invalid values found.
-     * If the file does not exist or cannot be parsed as JSON, returns fresh
-     * defaults instead of throwing, so a missing or corrupted settings file
-     * never prevents the application from starting.
-     */
     public AppSettings load() {
-        if (!Files.exists(settingsFilePath)) {
-            return AppSettings.defaults();
-        }
         try {
-            AppSettings loaded = objectMapper.readValue(settingsFilePath.toFile(), AppSettings.class);
-            if (loaded == null) {
-                return AppSettings.defaults();
-            }
-            loaded.validateAndRepair();
-            return loaded;
-        } catch (IOException e) {
-            System.err.println("Settings file was corrupt or unreadable; falling back to defaults: "
-                    + e.getMessage());
-            backUpCorruptFile();
+            if (!Files.exists(file)) return AppSettings.defaults();
+            AppSettings value = gson.fromJson(Files.readString(file), AppSettings.class);
+            return value == null ? AppSettings.defaults() : sanitize(value);
+        } catch (Exception e) {
             return AppSettings.defaults();
         }
     }
 
-    /** Renames an unreadable settings file aside so it doesn't keep failing to load, and isn't silently lost. */
-    private void backUpCorruptFile() {
-        try {
-            Path backupPath = settingsFilePath.resolveSibling(SETTINGS_FILE_NAME + ".corrupt");
-            Files.move(settingsFilePath, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException ignored) {
-            // Best-effort only; failing to back up the corrupt file is not itself fatal.
-        }
-    }
-
-    /**
-     * Saves the given settings to disk as JSON. Errors are logged rather than
-     * thrown, since a failed save should not crash the running application.
-     */
     public void save(AppSettings settings) {
-        if (settings == null) {
-            return;
-        }
-        settings.validateAndRepair();
         try {
-            objectMapper.writeValue(settingsFilePath.toFile(), settings);
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, gson.toJson(sanitize(settings)));
         } catch (IOException e) {
-            System.err.println("Failed to save settings: " + e.getMessage());
+            throw new IllegalStateException("Unable to save settings", e);
         }
     }
 
-    public Path getSettingsFilePath() {
-        return settingsFilePath;
-    }
-
-    public Path getAppDataDirectory() {
-        return settingsFilePath.getParent();
+    private AppSettings sanitize(AppSettings s) {
+        AppSettings d = AppSettings.defaults();
+        return new AppSettings(
+                s.selectedCharm() == null ? d.selectedCharm() : s.selectedCharm(),
+                Math.max(1, Math.min(100, s.segments())),
+                Math.max(5, Math.min(50, s.segmentLength())),
+                Math.max(0, Math.min(3000, s.gravity())),
+                Math.max(0.8, Math.min(1.0, s.damping())),
+                Math.max(1, Math.min(30, s.constraintIterations())),
+                Math.max(1.0, Math.min(1.1, s.maxStretch())),
+                s.beads(), s.shadows(), s.sound(), s.animation(),
+                Math.max(0, s.screenIndex()));
     }
 }
