@@ -10,12 +10,14 @@ public class Bead {
 
     private final double restFraction;
     private final double radius;
+
     private Vector2 renderPosition = Vector2.ZERO;
 
     public Bead(double restFraction, double radius) {
         if (restFraction < 0.0 || restFraction > 1.0) {
             throw new IllegalArgumentException("restFraction must be within [0, 1]");
         }
+
         this.restFraction = restFraction;
         this.radius = radius;
     }
@@ -38,19 +40,29 @@ public class Bead {
 
     /**
      * Samples a rope's node chain at this bead's rest fraction, interpolating
-     * linearly between the two nearest nodes. Called once per rendered frame.
+     * linearly between the two nearest nodes.
      */
     public void sampleFrom(java.util.List<RopeNode> nodes) {
         if (nodes.size() < 2) {
-            renderPosition = nodes.isEmpty() ? Vector2.ZERO : nodes.get(0).getPosition();
+            renderPosition = nodes.isEmpty()
+                    ? Vector2.ZERO
+                    : nodes.get(0).position();
             return;
         }
+
         double scaledIndex = restFraction * (nodes.size() - 1);
+
         int lowerIndex = (int) Math.floor(scaledIndex);
         int upperIndex = Math.min(lowerIndex + 1, nodes.size() - 1);
+
         double t = scaledIndex - lowerIndex;
-        Vector2 lower = nodes.get(lowerIndex).getPosition();
-        Vector2 upper = nodes.get(upperIndex).getPosition();
-        renderPosition = lower.lerp(upper, t);
+
+        Vector2 lower = nodes.get(lowerIndex).position();
+        Vector2 upper = nodes.get(upperIndex).position();
+
+        renderPosition = new Vector2(
+        	    lower.x() + (upper.x() - lower.x()) * t,
+        	    lower.y() + (upper.y() - lower.y()) * t
+        	);
     }
 }
