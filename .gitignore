@@ -5,3 +5,10 @@ dist/
 *.class
 *.log
 .DS_Store
+.classpath
+.classpath
+.project
+.settings/
+target/
+INSTALL-UPGRADE*.txt
+.classpath
