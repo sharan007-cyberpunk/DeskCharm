@@ -10,10 +10,13 @@ import com.sharan.deskcharm.rendering.CharmRenderer;
 import com.sharan.deskcharm.rendering.RopeRenderer;
 import com.sharan.deskcharm.settings.AppSettings;
 import com.sharan.deskcharm.settings.SettingsStore;
+import com.sharan.deskcharm.ui.CharmPickerWindow;
+
 import javafx.animation.AnimationTimer;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.stage.Screen;
@@ -21,14 +24,27 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 public final class OverlayWindow {
+
+    private static final double WINDOW_WIDTH = 520;
+    private static final double WINDOW_HEIGHT = 760;
+    private static final double ANCHOR_X = WINDOW_WIDTH / 2.0;
+    private static final double ANCHOR_Y = 25.0;
+    private static final double CHARM_HIT_RADIUS = 55.0;
+
     private final RopeSimulation simulation;
     private final CharmLibrary library;
     private final SettingsStore settingsStore;
+    private final CharmRenderer charmRenderer = new CharmRenderer();
+    private final RopeRenderer ropeRenderer = new RopeRenderer();
+    private final BeadRenderer beadRenderer = new BeadRenderer();
+
     private AppSettings settings;
     private Stage stage;
     private Canvas canvas;
     private AnimationTimer timer;
     private Charm charm;
+    private CharmPickerWindow pickerWindow;
+    private boolean draggingCharmHorizontally;
 
     public OverlayWindow(RopeSimulation simulation, CharmLibrary library,
                          AppSettings settings, SettingsStore settingsStore) {
@@ -40,89 +56,273 @@ public final class OverlayWindow {
     }
 
     public void show() {
+        if (stage != null && stage.isShowing()) {
+            stage.toFront();
+            return;
+        }
+
         stage = new Stage(StageStyle.TRANSPARENT);
         stage.setAlwaysOnTop(true);
         stage.setResizable(false);
         stage.setTitle("DeskCharm");
 
-        canvas = new Canvas(520, 760);
+        canvas = new Canvas(WINDOW_WIDTH, WINDOW_HEIGHT);
         Pane root = new Pane(canvas);
         root.setStyle("-fx-background-color: transparent;");
-        Scene scene = new Scene(root, 520, 760, Color.TRANSPARENT);
-        scene.setFill(Color.TRANSPARENT);
 
+        Scene scene = new Scene(root, WINDOW_WIDTH, WINDOW_HEIGHT, Color.TRANSPARENT);
+        scene.setFill(Color.TRANSPARENT);
         installMouseHandlers(scene);
         stage.setScene(scene);
+
         positionOnScreen();
         stage.show();
 
-        simulation.setAnchor(new Vector2(260, 25));
+        simulation.setAnchor(new Vector2(ANCHOR_X, ANCHOR_Y));
 
         SimulationClock clock = new SimulationClock();
         timer = new AnimationTimer() {
             private long previous = -1;
-            @Override public void handle(long now) {
+
+            @Override
+            public void handle(long now) {
                 if (previous < 0) previous = now;
                 double dt = (now - previous) / 1_000_000_000.0;
                 previous = now;
-                if (settings.animation()) clock.consume(dt, simulation);
+                dt = Math.min(dt, 0.05);
+
+                if (settings.animation()) {
+                    clock.consume(dt, simulation);
+                }
                 render();
             }
         };
         timer.start();
+        render();
     }
 
     private void positionOnScreen() {
-        Rectangle2D bounds = Screen.getScreens().get(Math.min(settings.screenIndex(), Screen.getScreens().size()-1)).getVisualBounds();
-        stage.setX(bounds.getMinX() + (bounds.getWidth() - 520) / 2);
+        int screenIndex = Math.max(0, Math.min(settings.screenIndex(), Screen.getScreens().size() - 1));
+        Rectangle2D bounds = Screen.getScreens().get(screenIndex).getVisualBounds();
+        stage.setX(bounds.getMinX() + (bounds.getWidth() - WINDOW_WIDTH) / 2.0);
         stage.setY(bounds.getMinY());
     }
 
+    private enum DragMode { NONE, DESKTOP_POSITION, ROPE_PHYSICS }
+
+    private DragMode dragMode = DragMode.NONE;
+    private double desktopDragOffsetX;
+
     private void installMouseHandlers(Scene scene) {
-        scene.setOnMousePressed(e -> simulation.beginDrag(new Vector2(e.getX(), e.getY())));
-        scene.setOnMouseDragged(e -> simulation.updateDrag(new Vector2(e.getX(), e.getY())));
-        scene.setOnMouseReleased(e -> simulation.endDrag());
-        scene.setOnMouseMoved(e -> {});
+        scene.setOnMousePressed(event -> {
+            Vector2 point = new Vector2(event.getX(), event.getY());
+            Vector2 charmPosition = simulation.getCharmPosition();
+            double distanceToCharm = point.distance(charmPosition);
+
+            // Right-click on the charm: open the premium collection.
+            if (event.getButton() == MouseButton.SECONDARY
+                    && distanceToCharm <= CHARM_HIT_RADIUS) {
+                dragMode = DragMode.NONE;
+                simulation.endDrag();
+                openCharmPicker();
+                event.consume();
+                return;
+            }
+
+            // Double-click on the charm: open the premium collection.
+            if (event.getButton() == MouseButton.PRIMARY
+                    && event.getClickCount() == 2
+                    && distanceToCharm <= CHARM_HIT_RADIUS) {
+                dragMode = DragMode.NONE;
+                simulation.endDrag();
+                openCharmPicker();
+                event.consume();
+                return;
+            }
+
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+
+            /*
+             * TWO DIFFERENT INTERACTIONS:
+             *
+             * 1. Grab the charm itself -> move the whole DeskCharm window
+             *    horizontally along the top of the desktop. The rope keeps
+             *    its physics in local coordinates.
+             *
+             * 2. Grab the rope/body -> engage the original rope physics drag.
+             *    The endpoint jumps toward the pointer and the rope bends,
+             *    stretches and swings naturally when released.
+             */
+            if (distanceToCharm <= CHARM_HIT_RADIUS) {
+                dragMode = DragMode.DESKTOP_POSITION;
+                desktopDragOffsetX = event.getScreenX() - stage.getX();
+                event.consume();
+                return;
+            }
+
+            dragMode = DragMode.ROPE_PHYSICS;
+            simulation.beginDrag(point);
+            event.consume();
+        });
+
+        scene.setOnMouseDragged(event -> {
+            if (!event.isPrimaryButtonDown()) {
+                return;
+            }
+
+            if (dragMode == DragMode.DESKTOP_POSITION) {
+                moveOverlayAlongDesktop(event.getScreenX());
+                event.consume();
+                return;
+            }
+
+            if (dragMode == DragMode.ROPE_PHYSICS) {
+                simulation.updateDrag(new Vector2(event.getX(), event.getY()));
+                event.consume();
+            }
+        });
+
+        scene.setOnMouseReleased(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+
+            if (dragMode == DragMode.ROPE_PHYSICS) {
+                simulation.endDrag();
+            }
+
+            dragMode = DragMode.NONE;
+            event.consume();
+        });
+    }
+
+    private void moveOverlayAlongDesktop(double screenMouseX) {
+        if (stage == null) {
+            return;
+        }
+
+        Screen screen = findScreenForX(screenMouseX);
+        Rectangle2D bounds = screen.getVisualBounds();
+
+        // Keep the charm at the top while allowing it to travel from
+        // the left edge to the right edge of the usable desktop.
+        double desiredX = screenMouseX - desktopDragOffsetX;
+
+        double minimumX = bounds.getMinX() - ANCHOR_X;
+        double maximumX = bounds.getMaxX() - ANCHOR_X;
+
+        stage.setY(bounds.getMinY());
+        stage.setX(Math.max(minimumX, Math.min(maximumX, desiredX)));
+    }
+
+    private Screen findScreenForX(double x) {
+        for (Screen screen : Screen.getScreens()) {
+            Rectangle2D bounds = screen.getVisualBounds();
+            if (x >= bounds.getMinX() && x <= bounds.getMaxX()) {
+                return screen;
+            }
+        }
+
+        int index = Math.max(
+                0,
+                Math.min(settings.screenIndex(), Screen.getScreens().size() - 1)
+        );
+        return Screen.getScreens().get(index);
     }
 
     private void render() {
-        var g = canvas.getGraphicsContext2D();
-        g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        if (canvas == null) return;
 
-        new RopeRenderer().draw(g, simulation.getNodes());
-        if (settings.beads()) new BeadRenderer().draw(g, simulation.getNodes());
-        new CharmRenderer().draw(g, charm, simulation.getCharmPosition().x(),
-                simulation.getCharmPosition().y(), null, settings.shadows());
+        var graphics = canvas.getGraphicsContext2D();
+        graphics.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        ropeRenderer.draw(graphics, simulation.getNodes(), charm);
+
+        if (settings.beads()) {
+            beadRenderer.draw(graphics, simulation.getNodes());
+        }
+
+        Vector2 charmPosition = simulation.getCharmPosition();
+        charmRenderer.draw(graphics, charm, charmPosition.x(), charmPosition.y(), null, settings.shadows());
     }
 
     public void setCharm(String id) {
-        charm = library.find(id);
-        settings = new AppSettings(id, settings.segments(), settings.segmentLength(),
-                settings.gravity(), settings.damping(), settings.constraintIterations(),
-                settings.maxStretch(), settings.beads(), settings.shadows(), settings.sound(),
-                settings.animation(), settings.screenIndex());
+        Charm selected = library.find(id);
+        if (selected == null) return;
+
+        charm = selected;
+        settings = new AppSettings(
+                id,
+                settings.segments(),
+                settings.segmentLength(),
+                settings.gravity(),
+                settings.damping(),
+                settings.constraintIterations(),
+                settings.maxStretch(),
+                settings.beads(),
+                settings.shadows(),
+                settings.sound(),
+                settings.animation(),
+                settings.screenIndex()
+        );
+
         settingsStore.save(settings);
+        simulation.setAnchor(new Vector2(ANCHOR_X, ANCHOR_Y));
         simulation.wakeUp();
+        render();
     }
 
     public void toggleVisible() {
-        if (stage.isShowing()) stage.hide();
-        else stage.show();
+        if (stage == null) {
+            show();
+            return;
+        }
+
+        if (stage.isShowing()) {
+            stage.hide();
+        } else {
+            stage.show();
+            stage.toFront();
+            render();
+        }
     }
 
     public void resetPosition() {
+        if (stage == null) return;
+
         positionOnScreen();
-        simulation.reset(new Vector2(260, 25));
+        simulation.reset(new Vector2(ANCHOR_X, ANCHOR_Y));
+        simulation.setAnchor(new Vector2(ANCHOR_X, ANCHOR_Y));
+        simulation.wakeUp();
+        render();
     }
 
     public void openSettings() {
-        // Lightweight settings action: rotate to the next charm.
-        int index = library.all().indexOf(charm);
-        setCharm(library.all().get((index + 1) % library.all().size()).id());
+        openCharmPicker();
+    }
+
+    private void openCharmPicker() {
+        if (pickerWindow == null) {
+            pickerWindow = new CharmPickerWindow(library, this);
+        }
+        pickerWindow.show();
     }
 
     public void close() {
-        if (timer != null) timer.stop();
-        if (stage != null) stage.close();
+        if (timer != null) {
+            timer.stop();
+            timer = null;
+        }
+
+        if (pickerWindow != null) {
+            pickerWindow.close();
+        }
+
+        if (stage != null) {
+            stage.close();
+            stage = null;
+        }
     }
 }
