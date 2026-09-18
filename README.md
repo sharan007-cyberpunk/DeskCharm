@@ -2,7 +2,7 @@
 
 A Windows JavaFX desktop ornament inspired by the documented interaction model of the public Hangly project.
 
-This is an independent implementation. It does not copy Hangly source code, artwork, branding, or protected assets.
+This is an independent implementation.
 
 ## Features
 
