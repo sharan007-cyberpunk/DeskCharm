@@ -42,6 +42,8 @@ public final class SettingsStore {
                 Math.max(1, Math.min(30, s.constraintIterations())),
                 Math.max(1.0, Math.min(1.1, s.maxStretch())),
                 s.beads(), s.shadows(), s.sound(), s.animation(),
-                Math.max(0, s.screenIndex()));
+                Math.max(0, s.screenIndex()),
+                Math.max(0.5, Math.min(2.0, s.charmScale() <= 0 ? d.charmScale() : s.charmScale())),
+                s.dangleText() == null ? d.dangleText() : s.dangleText());
     }
 }

@@ -52,7 +52,17 @@ public final class OverlayWindow {
         this.library = library;
         this.settings = settings;
         this.settingsStore = settingsStore;
-        this.charm = library.find(settings.selectedCharm());
+
+        // Name Dangle charms aren't part of the static library, so if the last session had one
+        // active, recreate it from the saved text before looking up the selected charm.
+        if ("name-dangle".equals(settings.selectedCharm()) && settings.dangleText() != null
+                && !settings.dangleText().isBlank()) {
+            library.add(new Charm("name-dangle", settings.dangleText(),
+                    com.sharan.deskcharm.charm.CharmType.DANGLE_NAME, 38, null, settings.dangleText()));
+        }
+
+        Charm initial = library.find(settings.selectedCharm());
+        this.charm = initial.withRadius(initial.radius() * settings.charmScale());
     }
 
     public void show() {
@@ -241,7 +251,7 @@ public final class OverlayWindow {
         ropeRenderer.draw(graphics, simulation.getNodes(), charm);
 
         if (settings.beads()) {
-            beadRenderer.draw(graphics, simulation.getNodes());
+            beadRenderer.draw(graphics, simulation.getNodes(), charm);
         }
 
         Vector2 charmPosition = simulation.getCharmPosition();
@@ -252,26 +262,60 @@ public final class OverlayWindow {
         Charm selected = library.find(id);
         if (selected == null) return;
 
-        charm = selected;
-        settings = new AppSettings(
-                id,
-                settings.segments(),
-                settings.segmentLength(),
-                settings.gravity(),
-                settings.damping(),
-                settings.constraintIterations(),
-                settings.maxStretch(),
-                settings.beads(),
-                settings.shadows(),
-                settings.sound(),
-                settings.animation(),
-                settings.screenIndex()
-        );
+        charm = selected.withRadius(baseRadiusFor(selected) * settings.charmScale());
+        settings = settings.withSelectedCharm(id);
 
         settingsStore.save(settings);
         simulation.setAnchor(new Vector2(ANCHOR_X, ANCHOR_Y));
         simulation.wakeUp();
         render();
+    }
+
+    /** Creates (or updates) a Name Dangle charm from typed text and makes it the active charm.
+     *  The dangle is added to the library under a fixed id, so re-typing a new name just replaces
+     *  the previous dangle rather than piling up duplicate library entries. */
+    public void setNameDangle(String text) {
+        String label = text == null ? "" : text.trim();
+        if (label.isEmpty()) return;
+
+        Charm dangle = new Charm("name-dangle", label, com.sharan.deskcharm.charm.CharmType.DANGLE_NAME,
+                38, null, label);
+        library.add(dangle);
+        settings = settings.withDangleText(label);
+        setCharm("name-dangle");
+    }
+
+    /** Applies the size-control slider: rescales whichever charm is currently active, without
+     *  changing which charm is selected. */
+    public void setCharmScale(double scale) {
+        settings = settings.withCharmScale(scale);
+        settingsStore.save(settings);
+        charm = charm.withRadius(baseRadiusFor(library.find(settings.selectedCharm())) * scale);
+        simulation.wakeUp();
+        render();
+    }
+
+    public double getCharmScale() {
+        return settings.charmScale();
+    }
+
+    /** Applies a live total rope-length change and persists it for the next launch. */
+    public void setRopeLength(double totalLength) {
+        double clamped = Math.max(120, Math.min(900, totalLength));
+        simulation.setRopeLength(clamped);
+        settings = settings.withRopeLength(clamped);
+        settingsStore.save(settings);
+        simulation.setAnchor(new Vector2(ANCHOR_X, ANCHOR_Y));
+        simulation.wakeUp();
+        render();
+    }
+
+    public double getRopeLength() {
+        return simulation.getRopeLength();
+    }
+
+    private double baseRadiusFor(Charm libraryCharm) {
+        return libraryCharm.radius();
     }
 
     public void toggleVisible() {

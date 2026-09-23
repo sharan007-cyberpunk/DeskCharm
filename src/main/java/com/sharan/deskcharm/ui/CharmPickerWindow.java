@@ -12,6 +12,7 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.FlowPane;
@@ -131,9 +132,93 @@ public final class CharmPickerWindow {
         HBox row = new HBox(20, titleBox, searchField);
         row.setAlignment(Pos.CENTER_LEFT);
 
-        VBox header = new VBox(row);
+        VBox header = new VBox(10, row, createNameDangleRow(), createSizeRow(), createRopeLengthRow());
         header.setPadding(new Insets(2, 2, 12, 2));
         return header;
+    }
+
+    private static final String FIELD_STYLE = """
+        -fx-background-color: rgba(255,255,255,0.07);
+        -fx-background-radius: 12;
+        -fx-border-color: rgba(255,255,255,0.10);
+        -fx-border-radius: 12;
+        -fx-text-fill: white;
+        -fx-prompt-text-fill: rgba(255,255,255,0.35);
+        -fx-padding: 8 14 8 14;
+    """;
+
+    /** "Name Dangle": type any text and it becomes a charm, engraved on a gold plaque. */
+    private HBox createNameDangleRow() {
+        Label label = new Label("Name Dangle");
+        label.setStyle("-fx-text-fill: rgba(255,255,255,0.55); -fx-font-size: 11px; -fx-font-weight: bold;");
+        label.setMinWidth(90);
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Type a name…");
+        nameField.setPrefWidth(220);
+        nameField.setStyle(FIELD_STYLE);
+
+        Button create = new Button("Create");
+        create.setStyle("""
+            -fx-background-color: linear-gradient(to bottom right, #E8CB86, #B8860B);
+            -fx-background-radius: 10;
+            -fx-text-fill: #241705;
+            -fx-font-weight: bold;
+            -fx-padding: 8 16 8 16;
+            -fx-cursor: hand;
+        """);
+        Runnable createDangle = () -> {
+            if (!nameField.getText().isBlank()) {
+                overlay.setNameDangle(nameField.getText());
+                close();
+            }
+        };
+        create.setOnAction(e -> createDangle.run());
+        nameField.setOnAction(e -> createDangle.run());
+
+        HBox row = new HBox(10, label, nameField, create);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    /** Global charm size control (0.5x - 2.0x), applied live to whichever charm is active. */
+    private HBox createSizeRow() {
+        Label label = new Label("Charm Size");
+        label.setStyle("-fx-text-fill: rgba(255,255,255,0.55); -fx-font-size: 11px; -fx-font-weight: bold;");
+        label.setMinWidth(90);
+
+        Slider slider = new Slider(0.5, 2.0, overlay.getCharmScale());
+        slider.setPrefWidth(220);
+        slider.valueProperty().addListener((obs, oldVal, newVal) -> overlay.setCharmScale(newVal.doubleValue()));
+
+        Label percent = new Label(Math.round(overlay.getCharmScale() * 100) + "%");
+        percent.setStyle("-fx-text-fill: rgba(255,255,255,0.55); -fx-font-size: 11px;");
+        percent.setMinWidth(40);
+        slider.valueProperty().addListener((obs, oldVal, newVal) -> percent.setText(Math.round(newVal.doubleValue() * 100) + "%"));
+
+        HBox row = new HBox(10, label, slider, percent);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    /** Total rope length control (120-900 px), applied live and persisted. */
+    private HBox createRopeLengthRow() {
+        Label label = new Label("Rope Length");
+        label.setStyle("-fx-text-fill: rgba(255,255,255,0.55); -fx-font-size: 11px; -fx-font-weight: bold;");
+        label.setMinWidth(90);
+
+        Slider slider = new Slider(120, 900, overlay.getRopeLength());
+        slider.setPrefWidth(220);
+        slider.valueProperty().addListener((obs, oldVal, newVal) -> overlay.setRopeLength(newVal.doubleValue()));
+
+        Label pixels = new Label(Math.round(overlay.getRopeLength()) + " px");
+        pixels.setStyle("-fx-text-fill: rgba(255,255,255,0.55); -fx-font-size: 11px;");
+        pixels.setMinWidth(50);
+        slider.valueProperty().addListener((obs, oldVal, newVal) -> pixels.setText(Math.round(newVal.doubleValue()) + " px"));
+
+        HBox row = new HBox(10, label, slider, pixels);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
     }
 
     private HBox createFooter() {

@@ -5,7 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 public final class RopeSimulation {
-    private final RopeConfiguration config;
+    private RopeConfiguration config;
     private final List<RopeNode> nodes = new ArrayList<>();
     private Vector2 anchor = Vector2.ZERO;
     private boolean held;
@@ -33,6 +33,19 @@ public final class RopeSimulation {
         anchor = newAnchor;
         nodes.get(0).setPosition(newAnchor);
         nodes.get(0).setPreviousPosition(newAnchor);
+    }
+
+    /** Rebuilds the rope with a new total length while preserving the segment count. */
+    public void setRopeLength(double totalLength) {
+        if (totalLength <= 0) throw new IllegalArgumentException("totalLength must be positive");
+        double segmentLength = totalLength / config.segments();
+        config = new RopeConfiguration(config.segments(), segmentLength, config.gravity(),
+                config.damping(), config.constraintIterations(), config.maxStretch());
+        reset(anchor);
+    }
+
+    public double getRopeLength() {
+        return config.segments() * config.segmentLength();
     }
 
     public List<RopeNode> getNodes() {
