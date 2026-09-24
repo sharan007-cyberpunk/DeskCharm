@@ -11,6 +11,9 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # only used to attach files to a GitHub Release on v* tags
 
     steps:
       - name: Checkout
@@ -23,13 +26,49 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Test and package
+      - name: Test and package (portable app + .msi + .exe)
         shell: pwsh
         run: .\scripts\build-windows.ps1
 
-      - name: Upload Windows package
+      # Installs the .msi silently and launches the app on the runner. It never blocks the
+      # artifacts below; if it fails, open this step (and the DeskCharm-Logs artifact).
+      - name: Smoke test (install + launch)
+        id: smoke
+        continue-on-error: true
+        shell: pwsh
+        run: .\scripts\smoke-test-windows.ps1 -DistDir dist -LogDir logs
+
+      - name: Upload smoke-test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeskCharm-Logs
+          path: logs/*
+          if-no-files-found: ignore
+
+      - name: Upload installers (.exe + .msi)
         uses: actions/upload-artifact@v4
         with:
           name: DeskCharm-Windows-x64
-          path: dist/*
+          path: |
+            dist/*.exe
+            dist/*.msi
           if-no-files-found: error
+
+      # Portable folder: download, extract, double-click DeskCharm.exe. No installer involved.
+      - name: Upload portable app
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeskCharm-Portable
+          path: dist/DeskCharm
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags like v1.2.3 only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.msi
+            dist/*.zip

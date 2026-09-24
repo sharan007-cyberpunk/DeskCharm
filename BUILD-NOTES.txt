@@ -6,4 +6,4 @@ Build locally on Windows:
   mvn --batch-mode clean test
   .\scripts\build-windows.ps1
 
-GitHub Actions builds on windows-latest and uploads the dist folder.
+GitHub Actions builds on windows-latest and uploads the installers (.exe + .msi) and the portable app.
